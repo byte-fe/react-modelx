@@ -24,7 +24,6 @@ const tryCatch: Middleware = async (context, restMiddlewares) => {
 
 const getNewState: Middleware = async (context, restMiddlewares) => {
   const { action, modelName, consumerActions, params, next, Global } = context
-  console.group('getNewState', modelName, Global.Actions)
   context.newState =
     (await action(params, {
       actions: consumerActions(Global.Actions[modelName], { modelName }),
@@ -35,29 +34,28 @@ const getNewState: Middleware = async (context, restMiddlewares) => {
   return await next(restMiddlewares)
 }
 
-const getNewStateWithCache = (maxTime: number = 5000): Middleware => async (
-  context,
-  restMiddlewares
-) => {
-  const {
-    action,
-    Global,
-    modelName,
-    consumerActions,
-    params,
-    next,
-    actionName
-  } = context
-  context.newState =
-    (await Promise.race([
-      action(params, {
-        actions: consumerActions(Global.Actions[modelName], { modelName }),
-        state: Global.State[modelName]
-      }),
-      timeout(maxTime, getCache(modelName, actionName))
-    ])) || null
-  return await next(restMiddlewares)
-}
+const getNewStateWithCache =
+  (maxTime: number = 5000): Middleware =>
+  async (context, restMiddlewares) => {
+    const {
+      action,
+      Global,
+      modelName,
+      consumerActions,
+      params,
+      next,
+      actionName
+    } = context
+    context.newState =
+      (await Promise.race([
+        action(params, {
+          actions: consumerActions(Global.Actions[modelName], { modelName }),
+          state: Global.State[modelName]
+        }),
+        timeout(maxTime, getCache(modelName, actionName))
+      ])) || null
+    return await next(restMiddlewares)
+  }
 
 const setNewState: Middleware = async (context, restMiddlewares) => {
   const { modelName, newState, next, Global } = context
@@ -71,7 +69,6 @@ const setNewState: Middleware = async (context, restMiddlewares) => {
       }
     })
   }
-  console.group('setNewState: ', newState)
   if (newState) {
     setPartialState(modelName, newState)
     return await next(restMiddlewares)
@@ -160,13 +157,11 @@ const communicator: Middleware = async (context, restMiddlewares) => {
   if (Global.Setter.classSetter) {
     Global.Setter.classSetter(Global.State)
   }
-  console.group('communicator function Setter: ', Global.Setter.functionSetter)
   if (Global.Setter.functionSetter[modelName]) {
     Object.keys(Global.Setter.functionSetter[modelName]).map((key) => {
       const setter = Global.Setter.functionSetter[modelName][key]
       if (setter) {
         if (!setter.selector) {
-          console.group('Global.State: ', Global.State)
           setter.setState(Global.State[modelName])
         } else {
           const newSelectorRef = setter.selector(Global.State[modelName])

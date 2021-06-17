@@ -28,6 +28,9 @@ interface Global {
   State: {
     [modelName: string]: any
   }
+  mutableState: {
+    [modelName: string]: any
+  }
   AsyncState: {
     [modelName: string]: undefined | ((context?: any) => Promise<Partial<any>>)
   }
@@ -41,6 +44,7 @@ interface Global {
   withDevTools: boolean
   uid: number
   storeId: number
+  currentStoreId: number
 }
 
 type ClassSetter = React.Dispatch<any> | undefined

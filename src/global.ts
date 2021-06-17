@@ -1,4 +1,5 @@
 const State = {}
+const mutableState = {}
 const Actions = {}
 const AsyncState = {}
 const Middlewares = {}
@@ -23,6 +24,7 @@ let withDevTools = false
 
 let uid = 0 // The unique id of hooks
 let storeId = 0 // The unique id of stores
+let currentStoreId = 0 // Used for useModel
 
 export default {
   Actions,
@@ -33,7 +35,9 @@ export default {
   State,
   devTools,
   subscriptions,
+  mutableState,
   uid,
   storeId,
+  currentStoreId,
   withDevTools
 } as Global

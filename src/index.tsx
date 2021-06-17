@@ -24,46 +24,58 @@ const isAPI = (input: any): input is API => {
 // useModel rules:
 // DON'T USE useModel OUTSIDE createStore func
 function useModel<S>(state: S): [S, (state: S) => void] {
-  // deeper hash
-  const hash = '___' + Global.uid
-  Global.State = produce(Global.State, (s) => {
-    s[hash] = state
-  })
+  const storeId = Global.currentStoreId
+  if (!Global.mutableState[storeId]) {
+    Global.mutableState[storeId] = { count: 0 }
+  }
+  const index = Global.mutableState[storeId].count
+  Global.mutableState[storeId].count += 1
+  if (!Global.mutableState[storeId][index]) {
+    Global.mutableState[storeId][index] = state
+  }
+
   const setter = async (state: S) => {
     const context: InnerContext = {
       Global,
       action: () => {
         return state
       },
-      actionName: "setter",
+      actionName: 'setter',
       consumerActions,
       middlewareConfig: {},
-      modelName: "__" + Global.uid,
+      modelName: '__' + storeId,
       newState: {},
       params: undefined,
       type: 'outer'
     }
-    Global.State = produce(Global.State, (s) => {
-      s[hash] = state
-    })
+    Global.mutableState[storeId][index] = state
     return await applyMiddlewares(actionMiddlewares, context)
   }
-  return [Global.State[hash], setter]
+  return [Global.mutableState[storeId][index], setter]
 }
 
 function createStore<S>(useHook: CustomModelHook<S>): LaneAPI<S> {
   Global.storeId += 1
-  const hash = '__' + Global.storeId
-  Global.Actions[hash] = {}
+  const storeId = Global.storeId
+  const hash = '__' + storeId
+  if (!Global.Actions[hash]) {
+    Global.Actions[hash] = {}
+  }
+  Global.currentStoreId = storeId
   const state = useHook()
   Global.State = produce(Global.State, (s) => {
     s[hash] = state
   })
-  console.group('useStore hash: ', hash)
+  const selector = () => {
+    Global.mutableState[storeId].count = 0
+    Global.currentStoreId = storeId
+    const res = useHook()
+    return res
+  }
   return {
     // TODO: support selector
-    useStore: () => useStore(hash)[0],
-    getState: () => getState(hash)
+    useStore: () => useStore(hash, selector)[0],
+    getState: () => selector()
   }
 }
 
@@ -111,9 +123,11 @@ function Model<M extends Models, MT extends ModelType, E>(
   } else {
     if (models.actions) {
       console.error('invalid model(s) schema: ', models)
-      const errorFn = (fakeReturnVal?: unknown) => (..._: unknown[]) => {
-        return fakeReturnVal
-      }
+      const errorFn =
+        (fakeReturnVal?: unknown) =>
+        (..._: unknown[]) => {
+          return fakeReturnVal
+        }
       // Fallback Functions
       return {
         __ERROR__: true,
@@ -271,7 +285,6 @@ const useStore = (modelName: string, selector?: Function) => {
   const hash = useRef<string>('')
 
   useLayoutEffect(() => {
-    console.group('useStore modelName: ', modelName)
     Global.uid += 1
     const local_hash = '' + Global.uid
     hash.current = local_hash
@@ -311,39 +324,41 @@ class Provider extends PureComponent<{}, Global['State']> {
   }
 }
 
-const connect = (
-  modelName: string,
-  mapState?: Function | undefined,
-  mapActions?: Function | undefined
-) => (Component: typeof React.Component | typeof PureComponent) =>
-  class P extends PureComponent<any> {
-    render() {
-      const { state: prevState = {}, actions: prevActions = {} } = this.props
-      return (
-        <Consumer>
-          {(models) => {
-            const { [`${modelName}`]: state } = models as any
-            const actions = Global.Actions[modelName]
-            return (
-              <Component
-                {...this.props}
-                state={{
-                  ...prevState,
-                  ...(mapState ? mapState(state) : state)
-                }}
-                actions={{
-                  ...prevActions,
-                  ...(mapActions
-                    ? mapActions(consumerActions(actions, { modelName }))
-                    : consumerActions(actions, { modelName }))
-                }}
-              />
-            )
-          }}
-        </Consumer>
-      )
+const connect =
+  (
+    modelName: string,
+    mapState?: Function | undefined,
+    mapActions?: Function | undefined
+  ) =>
+  (Component: typeof React.Component | typeof PureComponent) =>
+    class P extends PureComponent<any> {
+      render() {
+        const { state: prevState = {}, actions: prevActions = {} } = this.props
+        return (
+          <Consumer>
+            {(models) => {
+              const { [`${modelName}`]: state } = models as any
+              const actions = Global.Actions[modelName]
+              return (
+                <Component
+                  {...this.props}
+                  state={{
+                    ...prevState,
+                    ...(mapState ? mapState(state) : state)
+                  }}
+                  actions={{
+                    ...prevActions,
+                    ...(mapActions
+                      ? mapActions(consumerActions(actions, { modelName }))
+                      : consumerActions(actions, { modelName }))
+                  }}
+                />
+              )
+            }}
+          </Consumer>
+        )
+      }
     }
-  }
 
 export {
   actionMiddlewares,
