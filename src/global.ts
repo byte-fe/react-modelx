@@ -22,6 +22,7 @@ let devTools: any
 let withDevTools = false
 
 let uid = 0 // The unique id of hooks
+let storeId = 0 // The unique id of stores
 
 export default {
   Actions,
@@ -33,5 +34,6 @@ export default {
   devTools,
   subscriptions,
   uid,
+  storeId,
   withDevTools
 } as Global

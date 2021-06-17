@@ -21,6 +21,52 @@ const isAPI = (input: any): input is API => {
   return (input as API).useStore !== undefined
 }
 
+// useModel rules:
+// DON'T USE useModel OUTSIDE createStore func
+function useModel<S>(state: S): [S, (state: S) => void] {
+  // deeper hash
+  const hash = '___' + Global.uid
+  Global.State = produce(Global.State, (s) => {
+    s[hash] = state
+  })
+  const setter = async (state: S) => {
+    const context: InnerContext = {
+      Global,
+      action: () => {
+        return state
+      },
+      actionName: "setter",
+      consumerActions,
+      middlewareConfig: {},
+      modelName: "__" + Global.uid,
+      newState: {},
+      params: undefined,
+      type: 'outer'
+    }
+    Global.State = produce(Global.State, (s) => {
+      s[hash] = state
+    })
+    return await applyMiddlewares(actionMiddlewares, context)
+  }
+  return [Global.State[hash], setter]
+}
+
+function createStore<S>(useHook: CustomModelHook<S>): LaneAPI<S> {
+  Global.storeId += 1
+  const hash = '__' + Global.storeId
+  Global.Actions[hash] = {}
+  const state = useHook()
+  Global.State = produce(Global.State, (s) => {
+    s[hash] = state
+  })
+  console.group('useStore hash: ', hash)
+  return {
+    // TODO: support selector
+    useStore: () => useStore(hash)[0],
+    getState: () => getState(hash)
+  }
+}
+
 function Model<E, Ctx extends {}, MT extends ModelType<any, any, {}>>(
   models: MT,
   // initialState represent extContext here
@@ -36,8 +82,8 @@ function Model<M extends Models, MT extends ModelType, E>(
   extContext?: E
 ) {
   if (isModelType(models)) {
-    Global.uid += 1
-    const hash = '__' + Global.uid
+    Global.storeId += 1
+    const hash = '__' + Global.storeId
     Global.State = produce(Global.State, (s) => {
       s[hash] = models.state
     })
@@ -225,6 +271,7 @@ const useStore = (modelName: string, selector?: Function) => {
   const hash = useRef<string>('')
 
   useLayoutEffect(() => {
+    console.group('useStore modelName: ', modelName)
     Global.uid += 1
     const local_hash = '' + Global.uid
     hash.current = local_hash
@@ -300,6 +347,8 @@ const connect = (
 
 export {
   actionMiddlewares,
+  createStore,
+  useModel,
   Model,
   middlewares,
   Provider,
