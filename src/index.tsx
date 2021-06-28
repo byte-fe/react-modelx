@@ -8,6 +8,7 @@ import Global from './global'
 import {
   Consumer,
   consumerActions,
+  get,
   getInitialState,
   GlobalContext
 } from './helper'
@@ -19,6 +20,88 @@ const isModelType = (input: any): input is ModelType => {
 
 const isAPI = (input: any): input is API => {
   return (input as API).useStore !== undefined
+}
+
+// useModel rules:
+// DON'T USE useModel OUTSIDE createStore func
+function useModel<S>(
+  state: S | (() => S)
+): [S, (state: S | ((state: S) => S)) => void] {
+  const storeId = Global.currentStoreId
+  const index = Global.mutableState[storeId].count
+  Global.mutableState[storeId].count += 1
+  if (!Global.mutableState[storeId].hasOwnProperty(index)) {
+    if (typeof state === 'function') {
+      // @ts-ignore
+      Global.mutableState[storeId][index] = state()
+    } else {
+      Global.mutableState[storeId][index] = state
+    }
+  }
+
+  const setter = async (state: S | ((prevState: S) => S)) => {
+    const context: InnerContext = {
+      Global,
+      action: () => {
+        return typeof state === 'function'
+          ? // @ts-ignore
+            state(Global.mutableState[storeId][index])
+          : state
+      },
+      actionName: 'setter',
+      consumerActions,
+      disableSelectorUpdate: true,
+      middlewareConfig: {},
+      modelName: storeId,
+      newState: {},
+      params: undefined,
+      type: 'u'
+    }
+
+    if (typeof state === 'function') {
+      // @ts-ignore
+      Global.mutableState[storeId][index] = state(
+        Global.mutableState[storeId][index]
+      )
+    } else {
+      Global.mutableState[storeId][index] = state
+    }
+    // pass update event to other components subscribe the same store
+    return await applyMiddlewares(actionMiddlewares, context)
+  }
+  console.log('Global.mutableState[storeId]: ', Global.mutableState[storeId])
+  return [Global.mutableState[storeId][index], setter]
+}
+
+function createStore<S>(useHook: CustomModelHook<S>): LaneAPI<S>
+function createStore<S>(name: string, useHook: CustomModelHook<S>): LaneAPI<S>
+function createStore<S>(n: any, u?: any): LaneAPI<S> {
+  const hasName = typeof n === 'string'
+  Global.storeId += hasName ? 0 : 1
+  const storeId = hasName ? n : Global.storeId.toString()
+  if (!Global.Actions[storeId]) {
+    Global.Actions[storeId] = {}
+  }
+  if (!Global.mutableState[storeId]) {
+    Global.mutableState[storeId] = { count: 0 }
+  }
+  // Global.currentStoreId = storeId
+  // const state = useHook()
+  // Global.State = produce(Global.State, (s) => {
+  //   s[hash] = state
+  // })
+  const selector = () => {
+    Global.mutableState[storeId].count = 0
+    Global.currentStoreId = storeId
+    const res = u ? u() : n()
+    return res
+  }
+  Global.mutableState[storeId].selector = selector
+  return {
+    // TODO: support selector
+    useStore: () => useStore(storeId, selector),
+    getState: () => selector()
+  }
 }
 
 function Model<E, Ctx extends {}, MT extends ModelType<any, any, {}>>(
@@ -36,8 +119,8 @@ function Model<M extends Models, MT extends ModelType, E>(
   extContext?: E
 ) {
   if (isModelType(models)) {
-    Global.uid += 1
-    const hash = '__' + Global.uid
+    Global.storeId += 1
+    const hash = '__' + Global.storeId
     Global.State = produce(Global.State, (s) => {
       s[hash] = models.state
     })
@@ -193,7 +276,7 @@ const getState = (modelName: keyof typeof Global.State) => {
 
 const getActions = (
   modelName: string,
-  baseContext: Partial<Context> = { type: 'outer' }
+  baseContext: Partial<Context> = { type: 'o' }
 ) => {
   const updaters: any = {}
   Object.keys(Global.Actions[modelName]).forEach(
@@ -223,6 +306,12 @@ const getActions = (
 const useStore = (modelName: string, selector?: Function) => {
   const setState = useState({})[1]
   const hash = useRef<string>('')
+  // createStore('xxx', () => {}) has the top priority
+
+  const mutableState = get([modelName])(Global.mutableState)
+  const isFromCreateStore = !!mutableState
+  const usedSelector = isFromCreateStore ? mutableState.selector : selector
+  const usedState = isFromCreateStore ? mutableState : getState(modelName)
 
   useLayoutEffect(() => {
     Global.uid += 1
@@ -233,21 +322,22 @@ const useStore = (modelName: string, selector?: Function) => {
     }
     Global.Setter.functionSetter[modelName][local_hash] = {
       setState,
-      selector
+      selector: usedSelector
     }
     return function cleanup() {
       delete Global.Setter.functionSetter[modelName][local_hash]
     }
   }, [])
 
-  const updaters = getActions(modelName, {
-    __hash: hash.current,
-    type: 'function'
-  })
-  return [
-    selector ? selector(getState(modelName)) : getState(modelName),
-    updaters
-  ]
+  if (isFromCreateStore) {
+    return usedSelector(usedState)
+  } else {
+    const updaters = getActions(modelName, {
+      __hash: hash.current,
+      type: 'f'
+    })
+    return [usedSelector ? usedSelector(usedState) : usedState, updaters]
+  }
 }
 
 // Class API
@@ -300,6 +390,8 @@ const connect = (
 
 export {
   actionMiddlewares,
+  createStore,
+  useModel,
   Model,
   middlewares,
   Provider,
